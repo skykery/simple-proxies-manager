@@ -1,5 +1,6 @@
 import requests
-from queue import Queue
+# from queue import Queue
+from collections import deque
 
 
 class proxyManager:
@@ -24,7 +25,7 @@ class proxyManager:
 			            "47.52.24.117:80",
 			            "189.40.191.95:8080",
 			            "199.193.188.84:80"]
-			            # https://free-proxy-list.net/
+						# https://free-proxy-list.net/
 		self.invalidStringList = ["500 Internal Server Error","You’re not barking up the wrong tree",
 									"not allowed to access this page","Our systems have detected unusual traffic from your computer network",
 									"please type the characters below","Permission denied",
@@ -36,10 +37,24 @@ class proxyManager:
 									'DDoS protection by CloudFlare',
 									'To continue, please type the characters below',
 									'your computer or network may be sending automated queries','Enter the characters you see below']
-		self.proxiesQueue = Queue()
-		self.loadProxiesToQueue()
+		# self.checkProxies()
+		self.proxiesQueue = deque(self.proxies)
 		self.maxRotations = len(self.proxies)
 		self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36'}
+		self.proxyConnectionTimeout = 3
+
+
+	def checkProxies(self):
+		print("Checking proxies list...")
+		testUrl = "https://httpbin.org/ip"
+		connectionTimeout = 1
+		for i,proxy in enumerate(self.proxies):
+			try:
+				response = requests.get(testUrl, proxies = {"http":proxy}, timeout=(connectionTimeout, 10) )
+				print("Proxy {} from {}".format(i+1, len(self.proxies)))
+			except Exception as e:
+				print("Removing {} for {}".format(proxy, e))
+				self.proxies.remove(proxy)
 
 
 	def isBanned(self,response):
@@ -50,29 +65,28 @@ class proxyManager:
 		return False
 
 	def rotate(self, currentProxy):
-		newProxy = self.proxiesQueue.get()
-		self.proxiesQueue.put(currentProxy)
+		newProxy = self.proxiesQueue.popleft()
+		self.proxiesQueue.append(currentProxy)
 		proxy  = { "http" : newProxy }
 		return proxy
-		
 
-	def loadProxiesToQueue(self):
-		for proxy in self.proxies:
-			self.proxiesQueue.put(proxy)
 
 	def makeRequest(self,*args,**kwargs):
+		proxyError = False
 		requestsMethod = kwargs.pop("requestsMethod")
-		newProxy = self.proxiesQueue.get()
+		newProxy = self.proxiesQueue.popleft()
 		proxy = { "http" : newProxy }
 		print(proxy)
 		kwargs["proxies"] = proxy
 		response = requestsMethod(*args, **kwargs)
+		# print(response.text)
 		i = 1
-		while self.isBanned(response) and i<= self.maxRotations:
+		while self.isBanned(response) and i<= self.maxRotations or proxyError:
 			print("Making rotation")
 			proxy = self.rotate(newProxy)
 			print(proxy)
 			kwargs["proxies"] = proxy
+
 			response = requestsMethod(*args, **kwargs)
 			i += 1
 		return response
@@ -84,9 +98,10 @@ class proxyManager:
 			if 'headers' not in kwargs:
 				kwargs['headers'] = self.headers
 			kwargs["requestsMethod"] = getattr(requests, name)
+			kwargs["timeout"] = (self.proxyConnectionTimeout,25)
 			try:
 				response = self.makeRequest(*args, **kwargs)
-			except requests.exceptions.ProxyError as e:
+			except Exception as e:
 				print(e)
 				response = requests.Response()
 
@@ -94,9 +109,13 @@ class proxyManager:
 		return handlerFunction
 
 #TODO: check for long response proxies or dead ones
+"""
+	a method is to check at init
+	another one is to check at request
+"""
 
 if __name__ == '__main__':
-	url = "https://www.yelp.com/biz/changs-kitchen-san-francisco?osq=delivery"
+	url = "http://ip-api.com/json"
 	manager = proxyManager()
 
 	for i in range(0,10):
